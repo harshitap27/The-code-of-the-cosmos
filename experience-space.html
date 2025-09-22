@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Code of the Cosmos</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: white;
+            overflow-x: hidden;
+            overflow-y: scroll; /* Ensure scrollbar is always present */
+        }
+        #bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            outline: none;
+            z-index: 1; /* Behind labels */
+        }
+        #labels-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicking through to the canvas if needed */
+            z-index: 2;
+        }
+        .planet-label {
+            position: absolute;
+            background-color: rgba(17, 24, 39, 0.8); /* bg-gray-900 with opacity */
+            backdrop-filter: blur(5px);
+            border: 1px solid #374151; /* border-gray-700 */
+            padding: 1rem;
+            border-radius: 0.75rem; /* rounded-xl */
+            max-width: 320px;
+            width: 100%;
+            transition: opacity 0.5s ease;
+            /* transform is now set dynamically in JS */
+        }
+        .planet-label h2 {
+            font-size: 1.5rem; /* text-2xl */
+            font-weight: 700; /* font-bold */
+            margin-bottom: 0.5rem;
+            text-transform: capitalize;
+        }
+        .planet-label p {
+            color: #d1d5db; /* text-gray-300 */
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="bg-canvas"></canvas>
+    <div id="labels-container"></div>
+
+    <div class="fixed top-0 left-0 w-full h-full pointer-events-none z-10">
+        <div class="container mx-auto px-6 h-full flex flex-col justify-center items-center text-center">
+            <h1 id="main-title" class="text-5xl md:text-7xl font-bold text-white">The Code of the Cosmos</h1>
+            <p id="scroll-prompt" class="mt-4 text-xl text-gray-300 animate-pulse">Scroll down to begin your journey</p>
+        </div>
+    </div>
+    
+    <div id="scroll-container" style="height: 800vh;" class="relative"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/ScrollTrigger.min.js"></script>
+
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.querySelector('#bg-canvas'), antialias: true, alpha: true });
+        const clock = new THREE.Clock();
+
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x000000, 1);
+        camera.position.set(0, 5, 50);
+
+        const pointLight = new THREE.PointLight(0xffffff, 1.5, 2000); // Main light for the scene
+        scene.add(pointLight);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+        
+        const starGeometry = new THREE.BufferGeometry();
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1 });
+        const starVertices = [];
+        for (let i = 0; i < 10000; i++) {
+            const x = (Math.random() - 0.5) * 2000;
+            const y = (Math.random() - 0.5) * 2000;
+            const z = (Math.random() - 0.5) * 2000;
+            starVertices.push(x, y, z);
+        }
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        const planets = [];
+        const planetLabels = [];
+        const labelsContainer = document.getElementById('labels-container');
+        
+        // --- NEW & IMPROVED 3D SUN ---
+        const textureLoader = new THREE.TextureLoader();
+
+        const sunUniforms = {
+            u_time: { type: "f", value: 1.0 },
+            u_resolution: { type: "v2", value: new THREE.Vector2() },
+        };
+
+        const sunMaterial = new THREE.ShaderMaterial({
+            uniforms: sunUniforms,
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform float u_time;
+
+                // 2D Random
+                float random(vec2 st) {
+                    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+                }
+
+                // 2D Noise
+                float noise(vec2 st) {
+                    vec2 i = floor(st);
+                    vec2 f = fract(st);
+                    float a = random(i);
+                    float b = random(i + vec2(1.0, 0.0));
+                    float c = random(i + vec2(0.0, 1.0));
+                    float d = random(i + vec2(1.0, 1.0));
+                    vec2 u = f * f * (3.0 - 2.0 * f);
+                    return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+                }
+
+                // Fractional Brownian Motion
+                float fbm(vec2 st) {
+                    float value = 0.0;
+                    float amplitude = .5;
+                    float frequency = 0.;
+                    for (int i = 0; i < 6; i++) {
+                        value += amplitude * noise(st);
+                        st *= 2.;
+                        amplitude *= .5;
+                    }
+                    return value;
+                }
+
+                void main() {
+                    vec2 st = vUv * 5.0; // Scale the texture
+                    st.x += u_time * 0.05;
+                    float n = fbm(st);
+                    vec3 color = vec3(n * 2.0, n, n * 0.5); // Fiery color ramp
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `
+        });
+
+        const sun = new THREE.Mesh(new THREE.SphereGeometry(10, 64, 64), sunMaterial);
+        scene.add(sun);
+        
+
+        // Sun Glow
+        const sunGlowTexture = textureLoader.load('https://threejs.org/examples/textures/lensflare/lensflare0.png');
+        const sunGlowMaterial = new THREE.SpriteMaterial({
+            map: sunGlowTexture,
+            color: 0xffdd00,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.5,
+        });
+        const sunGlow = new THREE.Sprite(sunGlowMaterial);
+        sunGlow.scale.set(70, 70, 1.0); 
+        sun.add(sunGlow); 
+
+        // Cinematic Lens Flare
+        const textureFlare0 = textureLoader.load('https://threejs.org/examples/textures/lensflare/lensflare0.png');
+        const textureFlare3 = textureLoader.load('https://threejs.org/examples/textures/lensflare/lensflare3.png');
+
+        const lensflare = new THREE.Lensflare();
+        lensflare.addElement(new THREE.LensflareElement(textureFlare0, 700, 0, pointLight.color));
+        lensflare.addElement(new THREE.LensflareElement(textureFlare3, 60, 0.6));
+        lensflare.addElement(new THREE.LensflareElement(textureFlare3, 70, 0.7));
+        lensflare.addElement(new THREE.LensflareElement(textureFlare3, 120, 0.9));
+        lensflare.addElement(new THREE.LensflareElement(textureFlare3, 70, 1));
+        pointLight.add(lensflare); 
+
+
+        // --- PLANET DATA & CREATION ---
+        const planetData = {
+            1: { name: "Mercury", size: 1, color: 0x8c8c8c, yPos: -40, xPos: 20, titleColor: "text-gray-400", desc: "The smallest planet... The MESSENGER spacecraft's heat-resistant sunshade was crucial for mapping its surface.", link: "https://en.wikipedia.org/wiki/Mercury_(planet)" },
+            2: { name: "Venus", size: 2, color: 0xffd700, yPos: -80, xPos: -25, titleColor: "text-yellow-200", desc: "Earth's 'twin'... The Soviet Venera probes were engineering marvels, surviving immense pressure and heat to send back the first images from its surface.", link: "https://en.wikipedia.org/wiki/Venus" },
+            3: { name: "Earth", size: 2.2, color: 0x0077ff, yPos: -120, xPos: 20, titleColor: "text-blue-400", desc: "Our home... The innovation of Earth-observation satellites like the Landsat program has revolutionized our understanding of climate and our impact on the planet.", link: "https://en.wikipedia.org/wiki/Earth" },
+            4: { name: "Mars", size: 1.5, color: 0xff4500, yPos: -160, xPos: -20, titleColor: "text-red-400", desc: "The Red Planet... Innovations like the Ingenuity helicopter—the first powered flight on another world—are paving the way for human missions.", link: "https://en.wikipedia.org/wiki/Mars" },
+            5: { name: "Jupiter", size: 7, color: 0xffa500, yPos: -220, xPos: 30, titleColor: "text-orange-400", desc: "The Giant... The Juno spacecraft's radiation-hardened electronics are an innovation allowing it to survive Jupiter's intense magnetic field.", link: "https://en.wikipedia.org/wiki/Jupiter" },
+            6: { name: "Saturn", size: 6, color: 0xf0e68c, yPos: -280, xPos: -25, titleColor: "text-yellow-300", desc: "The Jewel... The Cassini mission revolutionized our understanding of its moons, discovering geysers on Enceladus and methane lakes on Titan.", link: "https://en.wikipedia.org/wiki/Saturn" },
+            7: { name: "Uranus", size: 4, color: 0x00ffff, yPos: -340, xPos: 20, titleColor: "text-cyan-300", desc: "The Ice Giant... Our only close-up view came from Voyager 2, an innovation in long-duration spaceflight still transmitting data from interstellar space.", link: "https://en.wikipedia.org/wiki/Uranus" },
+            8: { name: "Neptune", size: 3.8, color: 0x4169e1, yPos: -400, xPos: -20, titleColor: "text-indigo-400", desc: "The Mystic... Its existence was an innovation in theoretical astronomy; predicted mathematically before it was ever seen through a telescope.", link: "https://en.wikipedia.org/wiki/Neptune" },
+        };
+
+        for (const id in planetData) {
+            const data = planetData[id];
+            const planet = new THREE.Mesh(new THREE.SphereGeometry(data.size, 32, 32), new THREE.MeshStandardMaterial({ color: data.color }));
+            planet.position.set(data.xPos, data.yPos, 0);
+            planet.userData = { id: id };
+            
+            if (data.name === "Saturn") {
+                const ringGeo = new THREE.RingGeometry(data.size * 1.3, data.size * 2, 32);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.rotation.x = Math.PI * 0.55;
+                planet.add(ring);
+            }
+            
+            planets.push(planet);
+            scene.add(planet);
+
+            // Create HTML Label
+            const label = document.createElement('div');
+            label.className = 'planet-label';
+            const titleWord = data.titleColor.split('-')[1] || 'Planet';
+            label.innerHTML = `
+                <h2 class="${data.titleColor}">${data.name}: The ${titleWord} Planet</h2>
+                <p>${data.desc}</p>
+            `;
+            labelsContainer.appendChild(label);
+            planetLabels.push(label);
+        }
+
+        // --- GSAP SCROLL ANIMATION ---
+        gsap.registerPlugin(ScrollTrigger);
+        gsap.to(["#main-title", "#scroll-prompt"], {
+            scrollTrigger: { trigger: "#scroll-container", start: "top 90%", toggleActions: "play none none reverse" },
+            opacity: 0, duration: 1,
+        });
+
+        gsap.to(camera.position, {
+            scrollTrigger: {
+                trigger: "#scroll-container",
+                scrub: 1.5,
+                start: "top top",
+                end: "bottom bottom"
+            },
+            y: -420, // Extended scroll distance to cover all planets
+        });
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+            sunMaterial.uniforms.u_time.value = elapsedTime;
+
+            planets.forEach((planet, index) => {
+                planet.rotation.y += 0.002;
+
+                const vector = new THREE.Vector3();
+                planet.getWorldPosition(vector);
+                vector.project(camera);
+
+                const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+                
+                const label = planetLabels[index];
+                const cardGap = 40; // The space between the planet and the card
+
+                // Logic to position the card beside the planet
+                if (x > window.innerWidth / 2) {
+                    // Planet is on the right, place card to its left
+                    label.style.transform = 'translate(-100%, -50%)';
+                    label.style.left = `${x - cardGap}px`;
+                } else {
+                    // Planet is on the left, place card to its right
+                    label.style.transform = 'translate(0, -50%)';
+                    label.style.left = `${x + cardGap}px`;
+                }
+                label.style.top = `${y}px`; // <-- THIS LINE WAS CORRECTED
+
+                // Logic to hide labels when they are behind the camera
+                if (vector.z > 1) {
+                   label.style.display = 'none';
+                } else {
+                   label.style.display = 'block';
+                }
+            });
+
+            // sun.rotation.y += 0.0005; // No need to rotate the texture, shader handles animation
+
+            renderer.render(scene, camera);
+        }
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
